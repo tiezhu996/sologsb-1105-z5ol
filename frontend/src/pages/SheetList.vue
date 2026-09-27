@@ -49,10 +49,17 @@ function neighborSummary(sheet: Sheet): string {
   if (status.adjacentCount === 0) {
     return '尚未登记邻接图'
   }
-  if (status.missingCodes.length === 0) {
+  if (status.missingCodes.length === 0 && status.pendingCount === 0) {
     return `邻接图 ${status.adjacentCount} 幅，馆藏齐备`
   }
-  return `邻接图 ${status.adjacentCount} 幅，缺 ${status.missingCodes.join('、')}`
+  const notes: string[] = []
+  if (status.missingCodes.length > 0) {
+    notes.push(`缺 ${status.missingCodes.join('、')}`)
+  }
+  if (status.pendingCount > 0) {
+    notes.push(`${status.pendingCount} 幅退回待核`)
+  }
+  return `邻接图 ${status.adjacentCount} 幅，${notes.join('，')}`
 }
 
 function updateNeighborCodes(event: Event): void {

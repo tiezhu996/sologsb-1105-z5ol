@@ -16,6 +16,9 @@ export interface NeighborStatus {
   entries: NeighborEntry[]
   missingCodes: string[]
   adjacentCount: number
+  completeCount: number
+  pendingCount: number
+  pendingCodes: string[]
 }
 
 export function useSheetNeighbors(sheetId: MaybeRefOrGetter<string>) {
@@ -32,12 +35,17 @@ export function useSheetNeighbors(sheetId: MaybeRefOrGetter<string>) {
       }
     })
     const missingCodes = entries.filter((entry) => !entry.sheet).map((entry) => entry.code)
+    // 与定编校核同一口径：已退回待核的邻接图不计入馆藏齐备
+    const pendingCodes = entries.filter((entry) => entry.sheet?.status === '待核').map((entry) => entry.code)
 
     return {
       ...(source ? { source } : {}),
       entries,
       missingCodes,
       adjacentCount: entries.length,
+      completeCount: entries.length - missingCodes.length - pendingCodes.length,
+      pendingCount: pendingCodes.length,
+      pendingCodes,
     }
   }
 

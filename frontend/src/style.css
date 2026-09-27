@@ -284,7 +284,7 @@ p {
 
 .metrics-strip {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 12px;
   margin-bottom: 20px;
 }
@@ -587,6 +587,24 @@ textarea.native-field {
 .scan-list {
   display: grid;
   gap: 13px;
+}
+
+.finalization-alert {
+  margin: 16px 0 4px;
+}
+
+.finalization-panel {
+  padding: 14px;
+  margin-top: 16px;
+  background: #f4eadb;
+  border: 1px dashed #c4a582;
+  border-radius: 7px;
+}
+
+.finalization-panel p {
+  margin: 10px 0 0;
+  font-size: 12px;
+  line-height: 1.6;
 }
 
 .scan-card {

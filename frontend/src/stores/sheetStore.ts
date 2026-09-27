@@ -1,8 +1,9 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import type { ScanItem } from '../types/scan'
-import type { Sheet } from '../types/sheet'
+import type { Sheet, SheetStatus } from '../types/sheet'
 import { createId, db, plain } from '../utils/db'
+import { checkPrimaryScan, type PrimaryScanIssue } from '../utils/finalization'
 import { sortByYear } from '../utils/scale'
 
 export type NewSheet = Omit<Sheet, 'id' | 'neighborCodes'> & {
@@ -72,13 +73,16 @@ export const useSheetStore = defineStore('sheet', () => {
     }
     await db.scans.add(plain(scan))
     allScans.value = [...allScans.value, scan]
+    if (scan.isPrimary) {
+      await applyFinalizationCheck(scan.sheetId)
+    }
     return scan
   }
 
-  async function setPrimaryScan(scanId: string): Promise<void> {
+  async function setPrimaryScan(scanId: string): Promise<PrimaryScanIssue | null> {
     const target = allScans.value.find((scan) => scan.id === scanId)
     if (!target) {
-      return
+      return null
     }
     await db.scans.where('sheetId').equals(target.sheetId).modify({ isPrimary: false })
     await db.scans.update(scanId, { isPrimary: true })
@@ -88,6 +92,44 @@ export const useSheetStore = defineStore('sheet', () => {
       }
       return { ...scan, isPrimary: scan.id === scanId }
     })
+    return applyFinalizationCheck(target.sheetId)
+  }
+
+  async function updateSheetStatus(sheetId: string, status: SheetStatus): Promise<void> {
+    await db.sheets.update(sheetId, { status })
+    sheets.value = sheets.value.map((sheet) => (sheet.id === sheetId ? { ...sheet, status } : sheet))
+    if (currentSheet.value?.id === sheetId) {
+      currentSheet.value = { ...currentSheet.value, status }
+    }
+  }
+
+  /**
+   * 定编校核：主用件不达标时把已编图幅退回待核。
+   * 返回校核结果，页面据此写明哪一件未达要求。
+   */
+  async function applyFinalizationCheck(sheetId: string): Promise<PrimaryScanIssue | null> {
+    const sheet = sheets.value.find((item) => item.id === sheetId)
+    const primary = allScans.value.find((scan) => scan.sheetId === sheetId && scan.isPrimary)
+    const issue = checkPrimaryScan(primary)
+    if (issue && sheet?.status === '已编') {
+      await updateSheetStatus(sheetId, '待核')
+    }
+    return issue
+  }
+
+  /** 重新定编：待核图幅换回合格主用件后恢复已编。 */
+  async function finalizeSheet(sheetId: string): Promise<boolean> {
+    await init()
+    const sheet = sheets.value.find((item) => item.id === sheetId)
+    if (!sheet || sheet.status !== '待核') {
+      return false
+    }
+    const primary = allScans.value.find((scan) => scan.sheetId === sheetId && scan.isPrimary)
+    if (!primary || checkPrimaryScan(primary)) {
+      return false
+    }
+    await updateSheetStatus(sheetId, '已编')
+    return true
   }
 
   function getSheetById(id: string): Sheet | undefined {
@@ -116,6 +158,7 @@ export const useSheetStore = defineStore('sheet', () => {
     loadSheet,
     addScan,
     setPrimaryScan,
+    finalizeSheet,
     getSheetById,
     getSheetByCode,
     getScansForSheet,

@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
+import { ElMessage } from 'element-plus'
 import { useSheetStore, type NewScanItem } from '../stores/sheetStore'
 import { usePlaceStore } from '../stores/placeStore'
 import type { ColorMode, ScanQuality } from '../types/scan'
 import { COLOR_MODES, SCAN_QUALITIES } from '../types/scan'
 import { usePlaceSearch } from '../hooks/usePlaceSearch'
 import { estimateSheetSpan, scaleToText } from '../utils/scale'
+import { checkPrimaryScan } from '../utils/finalization'
 import { downloadJson } from '../utils/export'
 import PairRow from '../components/common/PairRow.vue'
 import ScanCard from '../components/common/ScanCard.vue'
@@ -27,6 +29,8 @@ const sheet = computed(() => {
 const relatedPlaces = computed(() => placeStore.getPairsForSheet(sheetId.value))
 const relatedHits = computed(() => hits.value.filter((hit) => hit.pair.sheetId === sheetId.value))
 const spanEstimate = computed(() => (sheet.value ? estimateSheetSpan(sheet.value.scale, sheet.value.sheetSizeCm) : undefined))
+const primaryScan = computed(() => sheetStore.currentScans.find((scan) => scan.isPrimary))
+const primaryIssue = computed(() => checkPrimaryScan(primaryScan.value))
 
 function createScanForm(): NewScanItem {
   return {
@@ -63,6 +67,24 @@ async function submitScan(): Promise<void> {
   })
   resetScanForm()
   showScanForm.value = false
+}
+
+async function handleSetPrimary(scanId: string): Promise<void> {
+  const issue = await sheetStore.setPrimaryScan(scanId)
+  if (issue) {
+    ElMessage.warning(`主用件「${issue.scan.fileName}」未达定编要求，图幅已退回待核。`)
+    return
+  }
+  ElMessage.success('已切换主用件。')
+}
+
+async function handleRefinalize(): Promise<void> {
+  const finalized = await sheetStore.finalizeSheet(sheetId.value)
+  if (finalized) {
+    ElMessage.success('主用件达标，图幅已重新定编。')
+  } else {
+    ElMessage.error('主用件未达定编要求，暂不能重新定编。')
+  }
 }
 
 function exportSheet(): void {
@@ -102,12 +124,26 @@ watch(sheetId, () => {
           <div class="detail-hero__tags">
             <el-tag type="warning" effect="dark">{{ sheet.year }} 年</el-tag>
             <el-tag type="info" effect="dark">{{ sheet.scale }}</el-tag>
-            <el-tag effect="dark">{{ sheet.status }}</el-tag>
+            <el-tag :type="sheet.status === '已编' ? 'success' : sheet.status === '待核' ? 'warning' : 'info'" effect="dark">
+              {{ sheet.status }}
+            </el-tag>
             <el-tag v-if="spanEstimate" effect="dark">
               约 {{ spanEstimate.widthKm }} × {{ spanEstimate.heightKm }} 公里
             </el-tag>
           </div>
         </header>
+
+        <el-alert
+          v-if="primaryIssue"
+          class="finalization-alert"
+          type="error"
+          show-icon
+          :closable="false"
+          :title="`定编校核未通过：主用件「${primaryIssue.scan.fileName}」${primaryIssue.reasons.join('，')}。`"
+        >
+          <p v-if="sheet.status === '待核'">图幅已退回待核，更换合格主用件后可在编目摘要中重新定编。</p>
+          <p v-else>更换合格主用件后方可定编。</p>
+        </el-alert>
 
         <div class="section-title">
           <div>
@@ -166,7 +202,7 @@ watch(sheetId, () => {
               link
               :type="scan.isPrimary ? 'success' : 'primary'"
               :disabled="scan.isPrimary"
-              @click="sheetStore.setPrimaryScan(scan.id)"
+              @click="handleSetPrimary(scan.id)"
             >
               {{ scan.isPrimary ? '当前主用件' : `设为主用件：${scan.fileName}` }}
             </el-button>
@@ -189,6 +225,13 @@ watch(sheetId, () => {
             <div><dt>扫描件</dt><dd>{{ sheetStore.currentScans.length }} 件</dd></div>
             <div><dt>地名对照</dt><dd>{{ relatedPlaces.length }} 条</dd></div>
           </dl>
+          <div v-if="sheet.status === '待核'" class="finalization-panel">
+            <el-button type="warning" :disabled="!primaryScan || !!primaryIssue" @click="handleRefinalize">
+              重新定编
+            </el-button>
+            <p v-if="!primaryScan" class="muted">尚未指定主用件，无法重新定编。</p>
+            <p v-else-if="primaryIssue" class="muted">主用件未达定编要求，更换合格主用件后方可重新定编。</p>
+          </div>
           <div class="mt-20">
             <router-link :to="`/sheets/${sheet.id}/neighbors`"><el-button>查看邻接与拼合预览</el-button></router-link>
             <el-button type="primary" plain @click="exportSheet">导出 JSON</el-button>

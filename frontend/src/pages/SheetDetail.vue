@@ -7,6 +7,7 @@ import type { ColorMode, ScanQuality } from '../types/scan'
 import { COLOR_MODES, SCAN_QUALITIES } from '../types/scan'
 import { usePlaceSearch } from '../hooks/usePlaceSearch'
 import { estimateSheetSpan, scaleToText } from '../utils/scale'
+import { checkPrimaryScan, describePrimaryIssue } from '../utils/validation'
 import { downloadJson } from '../utils/export'
 import PairRow from '../components/common/PairRow.vue'
 import ScanCard from '../components/common/ScanCard.vue'
@@ -27,6 +28,22 @@ const sheet = computed(() => {
 const relatedPlaces = computed(() => placeStore.getPairsForSheet(sheetId.value))
 const relatedHits = computed(() => hits.value.filter((hit) => hit.pair.sheetId === sheetId.value))
 const spanEstimate = computed(() => (sheet.value ? estimateSheetSpan(sheet.value.scale, sheet.value.sheetSizeCm) : undefined))
+
+const primaryCheck = computed(() => checkPrimaryScan(sheetStore.currentScans))
+const primaryIssueText = computed(() =>
+  primaryCheck.value.qualified ? '' : describePrimaryIssue(primaryCheck.value.primary, primaryCheck.value.issues),
+)
+
+async function handleSetPrimary(scanId: string): Promise<void> {
+  await sheetStore.setPrimaryScan(scanId)
+}
+
+async function handleRecatalog(): Promise<void> {
+  if (!sheet.value) {
+    return
+  }
+  await sheetStore.recatalogSheet(sheet.value.id)
+}
 
 function createScanForm(): NewScanItem {
   return {
@@ -102,12 +119,24 @@ watch(sheetId, () => {
           <div class="detail-hero__tags">
             <el-tag type="warning" effect="dark">{{ sheet.year }} 年</el-tag>
             <el-tag type="info" effect="dark">{{ sheet.scale }}</el-tag>
-            <el-tag effect="dark">{{ sheet.status }}</el-tag>
+            <el-tag :type="sheet.status === '已编' ? 'success' : sheet.status === '待核' ? 'warning' : 'info'" effect="dark">
+              {{ sheet.status }}
+            </el-tag>
             <el-tag v-if="spanEstimate" effect="dark">
               约 {{ spanEstimate.widthKm }} × {{ spanEstimate.heightKm }} 公里
             </el-tag>
           </div>
         </header>
+
+        <el-alert
+          v-if="sheet.status === '待核' && primaryIssueText"
+          class="review-alert"
+          type="error"
+          :closable="false"
+          show-icon
+          title="定编校核未通过，图幅已退回待核"
+          :description="`${primaryIssueText}请在下方换回合格主用件后重新定编。`"
+        />
 
         <div class="section-title">
           <div>
@@ -158,19 +187,29 @@ watch(sheetId, () => {
           <div v-if="sheetStore.currentScans.length === 0" class="empty-inline">该图幅尚未登记扫描件。</div>
         </div>
         <div v-if="sheetStore.currentScans.length" class="section-title">
-          <span class="muted">主用件标记可随时切换，原主用件会自动取消。</span>
-          <div>
+          <span class="muted">主用件标记可随时切换，原主用件会自动取消；新主用件不足 400dpi 或质量破损时，图幅退回待核。</span>
+          <div class="primary-actions">
             <el-button
               v-for="scan in sheetStore.currentScans"
               :key="`primary-${scan.id}`"
               link
               :type="scan.isPrimary ? 'success' : 'primary'"
               :disabled="scan.isPrimary"
-              @click="sheetStore.setPrimaryScan(scan.id)"
+              @click="handleSetPrimary(scan.id)"
             >
               {{ scan.isPrimary ? '当前主用件' : `设为主用件：${scan.fileName}` }}
             </el-button>
           </div>
+        </div>
+
+        <div v-if="sheet.status === '待核'" class="recatalog-bar">
+          <p class="muted">
+            主用件合格（分辨率不低于 400dpi 且非破损）后可重新定编；当前：
+            <span :class="primaryCheck.qualified ? '' : 'text-danger'">
+              {{ primaryCheck.qualified ? '主用件已合格' : primaryIssueText }}
+            </span>
+          </p>
+          <el-button type="primary" :disabled="!primaryCheck.qualified" @click="handleRecatalog">重新定编</el-button>
         </div>
       </div>
 

@@ -1,9 +1,10 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import type { ScanItem } from '../types/scan'
-import type { Sheet } from '../types/sheet'
+import type { Sheet, SheetStatus } from '../types/sheet'
 import { createId, db, plain } from '../utils/db'
 import { sortByYear } from '../utils/scale'
+import { checkPrimaryScan } from '../utils/validation'
 
 export type NewSheet = Omit<Sheet, 'id' | 'neighborCodes'> & {
   neighborCodes?: string[]
@@ -72,13 +73,46 @@ export const useSheetStore = defineStore('sheet', () => {
     }
     await db.scans.add(plain(scan))
     allScans.value = [...allScans.value, scan]
+    if (scan.isPrimary) {
+      await applyCatalogReview(scan.sheetId, [scan])
+    }
     return scan
   }
 
-  async function setPrimaryScan(scanId: string): Promise<void> {
+  /**
+   * 按主用件定编校核口径同步图幅状态：主用件不达标（分辨率不足 400dpi
+   * 或质量破损）时，图幅退回「待核」。
+   */
+  async function applyCatalogReview(sheetId: string, scansOverride?: ScanItem[]): Promise<Sheet | undefined> {
+    const { qualified } = checkPrimaryScan(scansOverride ?? getScansForSheet(sheetId))
+    if (qualified) {
+      return getSheetById(sheetId)
+    }
+    return updateSheetStatus(sheetId, '待核')
+  }
+
+  async function updateSheetStatus(sheetId: string, status: SheetStatus): Promise<Sheet | undefined> {
+    const existing = getSheetById(sheetId)
+    if (!existing || existing.status === status) {
+      return existing
+    }
+    await db.sheets.update(sheetId, { status })
+    const updated = { ...existing, status }
+    sheets.value = sheets.value.map((sheet) => (sheet.id === sheetId ? updated : sheet))
+    if (currentSheet.value?.id === sheetId) {
+      currentSheet.value = updated
+    }
+    return updated
+  }
+
+  /**
+   * 把某件扫描件设为主用件，并对新主用件执行定编校核：
+   * 分辨率不足 400dpi 或质量破损时，图幅退回「待核」，返回最新图幅。
+   */
+  async function setPrimaryScan(scanId: string): Promise<Sheet | undefined> {
     const target = allScans.value.find((scan) => scan.id === scanId)
     if (!target) {
-      return
+      return undefined
     }
     await db.scans.where('sheetId').equals(target.sheetId).modify({ isPrimary: false })
     await db.scans.update(scanId, { isPrimary: true })
@@ -88,6 +122,19 @@ export const useSheetStore = defineStore('sheet', () => {
       }
       return { ...scan, isPrimary: scan.id === scanId }
     })
+    return applyCatalogReview(target.sheetId)
+  }
+
+  /**
+   * 重新定编：换回合格主用件（分辨率不低于 400dpi 且非破损）后，
+   * 图幅由「待核」恢复为「已编」。主用件仍不达标时保持「待核」。
+   */
+  async function recatalogSheet(sheetId: string): Promise<Sheet | undefined> {
+    const { qualified } = checkPrimaryScan(getScansForSheet(sheetId))
+    if (!qualified) {
+      return getSheetById(sheetId)
+    }
+    return updateSheetStatus(sheetId, '已编')
   }
 
   function getSheetById(id: string): Sheet | undefined {
@@ -116,6 +163,7 @@ export const useSheetStore = defineStore('sheet', () => {
     loadSheet,
     addScan,
     setPrimaryScan,
+    recatalogSheet,
     getSheetById,
     getSheetByCode,
     getScansForSheet,

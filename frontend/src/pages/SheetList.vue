@@ -45,14 +45,17 @@ const filteredSheets = computed(() =>
 )
 
 function neighborSummary(sheet: Sheet): string {
-  const status = getNeighborStatus(sheet.id)
-  if (status.adjacentCount === 0) {
+  const neighbor = getNeighborStatus(sheet.id)
+  if (neighbor.adjacentCount === 0) {
     return '尚未登记邻接图'
   }
-  if (status.missingCodes.length === 0) {
-    return `邻接图 ${status.adjacentCount} 幅，馆藏齐备`
+  const pendingCodes = neighbor.unreviewedEntries.map((entry) => entry.code)
+  const pendingSuffix = pendingCodes.length ? `，待核 ${pendingCodes.join('、')}` : ''
+  if (neighbor.missingCodes.length === 0 && pendingCodes.length === 0) {
+    return `邻接图 ${neighbor.adjacentCount} 幅，馆藏齐备`
   }
-  return `邻接图 ${status.adjacentCount} 幅，缺 ${status.missingCodes.join('、')}`
+  const missingSuffix = neighbor.missingCodes.length ? `，缺 ${neighbor.missingCodes.join('、')}` : ''
+  return `邻接图 ${neighbor.adjacentCount} 幅，齐备 ${neighbor.completeCount} 幅${pendingSuffix}${missingSuffix}`
 }
 
 function updateNeighborCodes(event: Event): void {

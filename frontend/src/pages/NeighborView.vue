@@ -2,7 +2,12 @@
 import { computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { useSheetStore } from '../stores/sheetStore'
-import { useSheetNeighbors, type NeighborDirection, type NeighborEntry } from '../hooks/useSheetNeighbors'
+import {
+  useSheetNeighbors,
+  type NeighborDirection,
+  type NeighborEntry,
+} from '../hooks/useSheetNeighbors'
+import { describePrimaryIssue } from '../utils/validation'
 import type { ScanItem } from '../types/scan'
 import ScanCard from '../components/common/ScanCard.vue'
 import ScaleTag from '../components/common/ScaleTag.vue'
@@ -20,6 +25,13 @@ function entryAt(direction: NeighborDirection): NeighborEntry | undefined {
 
 function primaryScan(sheetIdToFind: string): ScanItem | undefined {
   return sheetStore.getScansForSheet(sheetIdToFind).find((scan) => scan.isPrimary)
+}
+
+function issueText(entry: NeighborEntry | undefined): string {
+  if (!entry?.primaryCheck || entry.primaryCheck.qualified) {
+    return ''
+  }
+  return describePrimaryIssue(entry.primaryCheck.primary, entry.primaryCheck.issues)
 }
 
 const sourcePrimaryScan = computed(() => (source.value ? primaryScan(source.value.id) : undefined))
@@ -51,7 +63,11 @@ onMounted(() => {
       </div>
       <div class="metric">
         <span>馆藏齐备</span>
-        <strong>{{ status.adjacentCount - status.missingCodes.length }}</strong><small>幅</small>
+        <strong>{{ status.completeCount }}</strong><small>幅</small>
+      </div>
+      <div class="metric">
+        <span>主用件待核</span>
+        <strong>{{ status.unreviewedEntries.length }}</strong><small>幅</small>
       </div>
       <div class="metric">
         <span>缺编图幅</span>
@@ -67,6 +83,7 @@ onMounted(() => {
             <h3>{{ entryAt('北')?.sheet?.code }}</h3>
             <p>{{ entryAt('北')?.sheet?.title }}</p>
             <router-link :to="`/sheets/${entryAt('北')?.sheet?.id}`"><el-button link type="primary">查看图幅</el-button></router-link>
+            <p v-if="issueText(entryAt('北'))" class="text-danger">{{ issueText(entryAt('北')) }}</p>
           </template>
           <template v-else>
             <h3 class="text-danger">{{ entryAt('北')?.code }}</h3>
@@ -83,6 +100,7 @@ onMounted(() => {
             <h3>{{ entryAt('西')?.sheet?.code }}</h3>
             <p>{{ entryAt('西')?.sheet?.title }}</p>
             <router-link :to="`/sheets/${entryAt('西')?.sheet?.id}`"><el-button link type="primary">查看图幅</el-button></router-link>
+            <p v-if="issueText(entryAt('西'))" class="text-danger">{{ issueText(entryAt('西')) }}</p>
           </template>
           <template v-else>
             <h3 class="text-danger">{{ entryAt('西')?.code }}</h3>
@@ -110,6 +128,7 @@ onMounted(() => {
             <h3>{{ entryAt('东')?.sheet?.code }}</h3>
             <p>{{ entryAt('东')?.sheet?.title }}</p>
             <router-link :to="`/sheets/${entryAt('东')?.sheet?.id}`"><el-button link type="primary">查看图幅</el-button></router-link>
+            <p v-if="issueText(entryAt('东'))" class="text-danger">{{ issueText(entryAt('东')) }}</p>
           </template>
           <template v-else>
             <h3 class="text-danger">{{ entryAt('东')?.code }}</h3>
@@ -126,6 +145,7 @@ onMounted(() => {
             <h3>{{ entryAt('南')?.sheet?.code }}</h3>
             <p>{{ entryAt('南')?.sheet?.title }}</p>
             <router-link :to="`/sheets/${entryAt('南')?.sheet?.id}`"><el-button link type="primary">查看图幅</el-button></router-link>
+            <p v-if="issueText(entryAt('南'))" class="text-danger">{{ issueText(entryAt('南')) }}</p>
           </template>
           <template v-else>
             <h3 class="text-danger">{{ entryAt('南')?.code }}</h3>
@@ -140,6 +160,7 @@ onMounted(() => {
         <template v-if="entryAt('东北')?.sheet">
           <h3>{{ entryAt('东北')?.sheet?.code }}</h3>
           <p>{{ entryAt('东北')?.sheet?.title }}</p>
+          <p v-if="issueText(entryAt('东北'))" class="text-danger">{{ issueText(entryAt('东北')) }}</p>
         </template>
         <template v-else>
           <h3 class="text-danger">{{ entryAt('东北')?.code }}</h3>
@@ -152,6 +173,7 @@ onMounted(() => {
         <template v-if="entryAt('西南')?.sheet">
           <h3>{{ entryAt('西南')?.sheet?.code }}</h3>
           <p>{{ entryAt('西南')?.sheet?.title }}</p>
+          <p v-if="issueText(entryAt('西南'))" class="text-danger">{{ issueText(entryAt('西南')) }}</p>
         </template>
         <template v-else>
           <h3 class="text-danger">{{ entryAt('西南')?.code }}</h3>
@@ -164,6 +186,18 @@ onMounted(() => {
       <div>
         <h2>缺编提示</h2>
         <p class="muted">以下邻接图号尚未建立本地图幅卡：{{ status.missingCodes.join('、') }}</p>
+      </div>
+    </div>
+
+    <div v-if="status.unreviewedEntries.length" class="section-title">
+      <div>
+        <h2>主用件待核</h2>
+        <p class="muted">以下邻接图主用件未通过定编校核，不计入馆藏齐备，请换回合格主用件后重新定编：</p>
+        <ul class="unreviewed-list">
+          <li v-for="entry in status.unreviewedEntries" :key="`issue-${entry.code}`" class="text-danger">
+            {{ entry.code }}：{{ issueText(entry) }}
+          </li>
+        </ul>
       </div>
     </div>
   </section>
